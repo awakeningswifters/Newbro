@@ -1,21 +1,5 @@
 -- 📦 Load Obsidian UI Library
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
-
--- 🎮 Variables & Services
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local player = game.Players.LocalPlayer
-local BALL_NAME = "Basketball"
-
--- ⚙️ Feature Settings
-local settings = {
-    alwaysIn = false, aimAssist = false, curveDist = 18, curveStr = 0.37,
-    fly = false, flySpeed = 50, infJump = false, noClip = false,
-    stats = false, walkSpeed = 16, jumpPower = 50,
-    ballSize = 3, ballTrail = false, infDribble = false
-}
-
--- ✨ Create Window
 local Window = Library:CreateWindow({
     Title = "Ruler Hub | Basketball: Zero",
     Footer = "v1.0.0",
@@ -24,7 +8,18 @@ local Window = Library:CreateWindow({
     AutoShow = true
 })
 
--- 🏷️ Tabs
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local player = game.Players.LocalPlayer
+local BALL_NAME = "Basketball"
+
+local settings = {
+    alwaysIn = false, aimAssist = false, curveDist = 18, curveStr = 0.37,
+    fly = false, flySpeed = 50, infJump = false, noClip = false,
+    stats = false, walkSpeed = 16, jumpPower = 50,
+    ballSize = 3, ballTrail = false, infDribble = false
+}
+
 local mainTab = Window:AddTab("Main", "home")
 local modsTab = Window:AddTab("Player Mods", "person")
 local visualsTab = Window:AddTab("Visuals", "eye")

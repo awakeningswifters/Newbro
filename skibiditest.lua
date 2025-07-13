@@ -118,6 +118,29 @@ LeftGroupbox:AddToggle("BallMagnet", {
         ballMagnetEnabled = Value
     end
 })
+local selectedTeam = "Home"
+
+LeftGroupbox:AddDropdown("Select Your Team", {
+    Values = {"Home", "Away"},
+    Default = 1,
+    Multi = false,
+    Text = "Your Team",
+    Tooltip = "Used for enemy hoop targeting",
+    Callback = function(value)
+        selectedTeam = value
+    end
+})
+
+-- Auto-select team from player's team
+local function updateTeam()
+    local team = player.Team and player.Team.Name
+    if team == "Home" or team == "Away" then
+        selectedTeam = team
+        Window:SetDropdownValue("Select Your Team", team)
+    end
+end
+updateTeam()
+player:GetPropertyChangedSignal("Team"):Connect(updateTeam)
 
 -- Fly
 local FlyToggle = LeftGroupbox:AddToggle("Fly", {
@@ -263,6 +286,18 @@ local AutoScoreToggle = RightGroupbox:AddToggle("AutoDunk", {
     end
 })
 
+local function getBall()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart")
+           and obj.Name == BALL_NAME
+           and obj:FindFirstChildWhichIsA("TouchInterest")
+           and not obj:IsDescendantOf(player.Character) then
+            return obj
+        end
+    end
+    return nil
+end
+
 -- NoClip logic
 game:GetService("RunService").Stepped:Connect(function()
     if noClipEnabled then
@@ -373,44 +408,6 @@ game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
--- Better Ball Predictor (parabolic arc preview)
-local predictionParts = {}
-local NUM_SEGMENTS = 20
-local SEGMENT_INTERVAL = 0.12
-
-function clearPrediction()
-    for _, p in ipairs(predictionParts) do
-        if p then p:Destroy() end
-    end
-    predictionParts = {}
-end
-
-function drawPrediction(ball)
-    clearPrediction()
-
-    local pos = ball.Position
-    local vel = ball.Velocity
-    local gravity = Vector3.new(0, workspace.Gravity, 0)
-
-    for i = 1, NUM_SEGMENTS do
-        local t = i * SEGMENT_INTERVAL
-        local nextPos = pos + vel * t + 0.5 * gravity * (t^2)
-
-        local part = Instance.new("Part")
-        part.Size = Vector3.new(0.3, 0.3, 0.3)
-        part.Shape = Enum.PartType.Ball
-        part.Material = Enum.Material.Neon
-        part.Color = Color3.fromRGB(0, 255, 0)
-        part.Anchored = true
-        part.CanCollide = false
-        part.Transparency = 0.25
-        part.Position = nextPos
-        part.Parent = workspace
-
-        table.insert(predictionParts, part)
-    end
-end
-
 -- Ball Predictor render
 game:GetService("RunService").RenderStepped:Connect(function()
     if ballPredictorEnabled and cachedBall then
@@ -424,63 +421,70 @@ game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
--- Steph Curry-Style Hoop Aimbot (Curved arc, real gravity, no teleport)
 local lastCurryTime = 0
 game:GetService("RunService").Heartbeat:Connect(function()
-    if hoopAimbotEnabled then
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local ball = workspace:FindFirstChild(BALL_NAME, true)
+    if not hoopAimbotEnabled then return end
 
-        if hrp and ball and ball.Velocity.Magnitude > 2 and tick() - lastCurryTime > 0.6 then
-            local closestHoop, closestDist = nil, math.huge
-            for _, obj in ipairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and obj.Name:lower() == "hoop" then
-                    local dist = (obj.Position - ball.Position).Magnitude
-                    if dist < closestDist then
-                        closestHoop = obj
-                        closestDist = dist
-                    end
-                end
-            end
+    local ball = getBall()
+    if not ball then return end
 
-            if closestHoop then
-                local g = workspace.Gravity
-                local startPos = ball.Position
-                local targetPos = closestHoop.Position + Vector3.new(0, 1.4, 0)
+    if ball.Velocity.Magnitude < 2 then return end
+    if tick() - lastCurryTime < 0.6 then return end
 
-                local displacement = targetPos - startPos
-                local dxz = Vector3.new(displacement.X, 0, displacement.Z).Magnitude
-                local dy = displacement.Y
-
-                local arcHeight = math.clamp(dy + 4.5, 6, 9.5)
-                local vy = math.sqrt(2 * g * arcHeight)
-                local t_up = vy / g
-                local t_down = math.sqrt((2 * math.max(arcHeight - dy, 1)) / g)
-                local totalTime = t_up + t_down
-
-                local vxz = dxz / totalTime
-                local dirXZ = Vector3.new(displacement.X, 0, displacement.Z).Unit
-
-                -- Apply slight random lateral curve (like Magnus effect)
-                local sideDir = dirXZ:Cross(Vector3.new(0, 1, 0)).Unit -- perpendicular
-                local curveStrength = math.random(1, 4) / 5 -- tweakable curve factor (0.2–0.8)
-                local curveVec = sideDir * curveStrength
-
-                local finalVelocity = dirXZ * vxz + Vector3.new(0, vy, 0) + curveVec
-
-                -- Clamp vertical so it doesn’t overshoot
-                finalVelocity = Vector3.new(finalVelocity.X, math.min(finalVelocity.Y, 60), finalVelocity.Z)
-
-                ball.Anchored = false
-                ball.CanCollide = false
-                ball.Velocity = finalVelocity
-                ball.RotVelocity = Vector3.new(0, 0, 0)
-
-                lastCurryTime = tick()
+    -- Target enemy hoop only
+    local enemyHoops = {}
+    for _, part in ipairs(workspace:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name:lower() == "hoop" then
+            if selectedTeam == "Home" and part.Position.Z > 0 then
+                table.insert(enemyHoops, part)
+            elseif selectedTeam == "Away" and part.Position.Z < 0 then
+                table.insert(enemyHoops, part)
             end
         end
     end
+    if #enemyHoops == 0 then return end
+
+    local targetHoop, dist = nil, math.huge
+    for _, h in ipairs(enemyHoops) do
+        local d = (h.Position - ball.Position).Magnitude
+        if d < dist then
+            targetHoop, dist = h, d
+        end
+    end
+    if not targetHoop then return end
+
+    local g = workspace.Gravity
+    local startPos = ball.Position
+    local targetPos = targetHoop.Position + Vector3.new(0, 1.4, 0)
+
+    local disp = targetPos - startPos
+    local dxz = Vector3.new(disp.X, 0, disp.Z).Magnitude
+    local dy = disp.Y
+
+    local arcHeight = math.clamp(dy + 4.5, 6, 9.5)
+    local vy = math.sqrt(2 * g * arcHeight)
+    local t_up = vy / g
+    local t_down = math.sqrt((2 * math.max(arcHeight - dy, 1)) / g)
+    local totalTime = t_up + t_down
+
+    local vxz = dxz / totalTime
+    local dirXZ = Vector3.new(disp.X, 0, disp.Z).Unit
+
+    local sideDir = dirXZ:Cross(Vector3.new(0, 1, 0)).Unit
+    local curveStrength = math.random(1, 4) / 5
+    local curveVec = sideDir * curveStrength
+
+    local finalVelocity = dirXZ * vxz + Vector3.new(0, vy, 0) + curveVec
+    finalVelocity = Vector3.new(finalVelocity.X, math.min(finalVelocity.Y, 60), finalVelocity.Z)
+
+    if dist > 8 then
+        ball.Anchored = false
+        ball.CanCollide = false
+        ball.Velocity = finalVelocity
+        ball.RotVelocity = Vector3.new(0, 0, 0)
+    end
+
+    lastCurryTime = tick()
 end)
 
 -- Ball Magnet logic

@@ -110,16 +110,6 @@ LeftGroupbox:AddToggle("HoopAimbot", {
         hoopAimbotEnabled = Value
     end
 })
-LeftGroupbox:AddDropdown("Select Your Team", {
-    Values = {"Home", "Away"},
-    Default = 1,
-    Multi = false,
-    Text = "Your Team",
-    Tooltip = "Used for enemy hoop targeting",
-    Callback = function(value)
-        selectedTeam = value
-    end
-})
 LeftGroupbox:AddToggle("BallMagnet", {
     Text = "Ball Magnet",
     Default = false,
@@ -434,100 +424,27 @@ game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
--- Auto-detect team on spawn
-local selectedTeam = "Home" -- default fallback
-local function detectTeam()
-    local char = player.Character
-    if char then
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            if hrp.Position.Z > 0 then
-                selectedTeam = "Away"
-            else
-                selectedTeam = "Home"
-            end
-        end
-    end
-end
-
-player.CharacterAdded:Connect(function()
-    wait(1)
-    detectTeam()
-end)
-
--- Highlight enemy hoop
-local hoopHighlight = Instance.new("Highlight")
-hoopHighlight.Name = "HoopHighlight"
-hoopHighlight.FillTransparency = 1
-hoopHighlight.OutlineColor = Color3.new(1, 0.4, 0)
-hoopHighlight.OutlineTransparency = 0
-hoopHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-hoopHighlight.Parent = game.CoreGui
-
--- Visual arc prediction tracer
-local predictionParts = {}
-local function clearPrediction()
-    for _, p in ipairs(predictionParts) do
-        if p then p:Destroy() end
-    end
-    predictionParts = {}
-end
-
-local function drawArcPrediction(pos, vel)
-    clearPrediction()
-
-    local gravity = Vector3.new(0, -workspace.Gravity, 0)
-    local segments = 20
-    local step = 0.1
-    for i = 1, segments do
-        local t = i * step
-        local point = pos + vel * t + 0.5 * gravity * (t * t)
-
-        local tracer = Instance.new("Part")
-        tracer.Anchored = true
-        tracer.CanCollide = false
-        tracer.Size = Vector3.new(0.2, 0.2, 0.2)
-        tracer.Shape = Enum.PartType.Ball
-        tracer.Material = Enum.Material.Neon
-        tracer.Color = Color3.fromRGB(255, 150, 0)
-        tracer.Position = point
-        tracer.Transparency = 0.2
-        tracer.Parent = workspace
-        table.insert(predictionParts, tracer)
-    end
-end
-
--- Hoop Aimbot logic
+-- Steph Curry-Style Hoop Aimbot (Curved arc, real gravity, no teleport)
 local lastCurryTime = 0
-RunService.Heartbeat:Connect(function()
+game:GetService("RunService").Heartbeat:Connect(function()
     if hoopAimbotEnabled then
         local char = player.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         local ball = workspace:FindFirstChild(BALL_NAME, true)
 
         if hrp and ball and ball.Velocity.Magnitude > 2 and tick() - lastCurryTime > 0.6 then
-            local enemyHoops = {}
+            local closestHoop, closestDist = nil, math.huge
             for _, obj in ipairs(workspace:GetDescendants()) do
                 if obj:IsA("BasePart") and obj.Name:lower() == "hoop" then
-                    if selectedTeam == "Home" and obj.Position.Z > 0 then
-                        table.insert(enemyHoops, obj)
-                    elseif selectedTeam == "Away" and obj.Position.Z < 0 then
-                        table.insert(enemyHoops, obj)
+                    local dist = (obj.Position - ball.Position).Magnitude
+                    if dist < closestDist then
+                        closestHoop = obj
+                        closestDist = dist
                     end
                 end
             end
 
-            local closestHoop, closestDist = nil, math.huge
-            for _, hoop in ipairs(enemyHoops) do
-                local dist = (hoop.Position - ball.Position).Magnitude
-                if dist < closestDist then
-                    closestHoop = hoop
-                    closestDist = dist
-                end
-            end
-
             if closestHoop then
-                hoopHighlight.Adornee = closestHoop
                 local g = workspace.Gravity
                 local startPos = ball.Position
                 local targetPos = closestHoop.Position + Vector3.new(0, 1.4, 0)
@@ -545,29 +462,24 @@ RunService.Heartbeat:Connect(function()
                 local vxz = dxz / totalTime
                 local dirXZ = Vector3.new(displacement.X, 0, displacement.Z).Unit
 
-                local sideDir = dirXZ:Cross(Vector3.new(0, 1, 0)).Unit
-                local curveStrength = math.random(1, 4) / 5
+                -- Apply slight random lateral curve (like Magnus effect)
+                local sideDir = dirXZ:Cross(Vector3.new(0, 1, 0)).Unit -- perpendicular
+                local curveStrength = math.random(1, 4) / 5 -- tweakable curve factor (0.2–0.8)
                 local curveVec = sideDir * curveStrength
 
                 local finalVelocity = dirXZ * vxz + Vector3.new(0, vy, 0) + curveVec
+
+                -- Clamp vertical so it doesn’t overshoot
                 finalVelocity = Vector3.new(finalVelocity.X, math.min(finalVelocity.Y, 60), finalVelocity.Z)
 
-                if closestDist > 8 then
-                    ball.Anchored = false
-                    ball.CanCollide = false
-                    ball.Velocity = finalVelocity
-                    ball.RotVelocity = Vector3.new(0, 0, 0)
-                    drawArcPrediction(startPos, finalVelocity)
-                end
+                ball.Anchored = false
+                ball.CanCollide = false
+                ball.Velocity = finalVelocity
+                ball.RotVelocity = Vector3.new(0, 0, 0)
 
                 lastCurryTime = tick()
-            else
-                hoopHighlight.Adornee = nil
             end
         end
-    else
-        hoopHighlight.Adornee = nil
-        clearPrediction()
     end
 end)
 

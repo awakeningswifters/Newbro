@@ -118,29 +118,6 @@ LeftGroupbox:AddToggle("BallMagnet", {
         ballMagnetEnabled = Value
     end
 })
-local selectedTeam = "Home"
-
-LeftGroupbox:AddDropdown("Select Your Team", {
-    Values = {"Home", "Away"},
-    Default = 1,
-    Multi = false,
-    Text = "Your Team",
-    Tooltip = "Used for enemy hoop targeting",
-    Callback = function(value)
-        selectedTeam = value
-    end
-})
-
--- Auto-select team from player's team
-local function updateTeam()
-    local team = player.Team and player.Team.Name
-    if team == "Home" or team == "Away" then
-        selectedTeam = team
-        Window:SetDropdownValue("Select Your Team", team)
-    end
-end
-updateTeam()
-player:GetPropertyChangedSignal("Team"):Connect(updateTeam)
 
 -- Fly
 local FlyToggle = LeftGroupbox:AddToggle("Fly", {
@@ -286,18 +263,6 @@ local AutoScoreToggle = RightGroupbox:AddToggle("AutoDunk", {
     end
 })
 
-local function getBall()
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart")
-           and obj.Name == BALL_NAME
-           and obj:FindFirstChildWhichIsA("TouchInterest")
-           and not obj:IsDescendantOf(player.Character) then
-            return obj
-        end
-    end
-    return nil
-end
-
 -- NoClip logic
 game:GetService("RunService").Stepped:Connect(function()
     if noClipEnabled then
@@ -421,70 +386,40 @@ game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
-local lastCurryTime = 0
-game:GetService("RunService").Heartbeat:Connect(function()
-    if not hoopAimbotEnabled then return end
+local RunService = game:GetService("RunService")
+local player = game.Players.LocalPlayer
 
-    local ball = getBall()
-    if not ball then return end
+-- Enable/Disable the HRP Hoop Aimbot
+local hrpAimbotEnabled = true
 
-    if ball.Velocity.Magnitude < 2 then return end
-    if tick() - lastCurryTime < 0.6 then return end
+RunService.Heartbeat:Connect(function()
+    if not hrpAimbotEnabled then return end
 
-    -- Target enemy hoop only
-    local enemyHoops = {}
-    for _, part in ipairs(workspace:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name:lower() == "hoop" then
-            if selectedTeam == "Home" and part.Position.Z > 0 then
-                table.insert(enemyHoops, part)
-            elseif selectedTeam == "Away" and part.Position.Z < 0 then
-                table.insert(enemyHoops, part)
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Find farthest hoop
+    local farthestHoop = nil
+    local maxDist = 0
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower() == "hoop" then
+            local dist = (obj.Position - hrp.Position).Magnitude
+            if dist > maxDist then
+                maxDist = dist
+                farthestHoop = obj
             end
         end
     end
-    if #enemyHoops == 0 then return end
 
-    local targetHoop, dist = nil, math.huge
-    for _, h in ipairs(enemyHoops) do
-        local d = (h.Position - ball.Position).Magnitude
-        if d < dist then
-            targetHoop, dist = h, d
-        end
+    -- Rotate HRP to face farthest hoop
+    if farthestHoop then
+        local lookVector = (farthestHoop.Position - hrp.Position).Unit
+        local flatLook = Vector3.new(lookVector.X, 0, lookVector.Z).Unit
+        local newCF = CFrame.new(hrp.Position, hrp.Position + flatLook)
+        hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.atan2(flatLook.X, flatLook.Z), 0)
     end
-    if not targetHoop then return end
-
-    local g = workspace.Gravity
-    local startPos = ball.Position
-    local targetPos = targetHoop.Position + Vector3.new(0, 1.4, 0)
-
-    local disp = targetPos - startPos
-    local dxz = Vector3.new(disp.X, 0, disp.Z).Magnitude
-    local dy = disp.Y
-
-    local arcHeight = math.clamp(dy + 4.5, 6, 9.5)
-    local vy = math.sqrt(2 * g * arcHeight)
-    local t_up = vy / g
-    local t_down = math.sqrt((2 * math.max(arcHeight - dy, 1)) / g)
-    local totalTime = t_up + t_down
-
-    local vxz = dxz / totalTime
-    local dirXZ = Vector3.new(disp.X, 0, disp.Z).Unit
-
-    local sideDir = dirXZ:Cross(Vector3.new(0, 1, 0)).Unit
-    local curveStrength = math.random(1, 4) / 5
-    local curveVec = sideDir * curveStrength
-
-    local finalVelocity = dirXZ * vxz + Vector3.new(0, vy, 0) + curveVec
-    finalVelocity = Vector3.new(finalVelocity.X, math.min(finalVelocity.Y, 60), finalVelocity.Z)
-
-    if dist > 8 then
-        ball.Anchored = false
-        ball.CanCollide = false
-        ball.Velocity = finalVelocity
-        ball.RotVelocity = Vector3.new(0, 0, 0)
-    end
-
-    lastCurryTime = tick()
 end)
 
 -- Ball Magnet logic
